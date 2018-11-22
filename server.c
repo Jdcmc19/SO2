@@ -10,32 +10,29 @@
 #include <dirent.h>
 
 #define PORT 8080
-#define MAXIMAS_CONEXIONES 69
-#define TIEMPO_REVISAR_CHECKSUM 15
+#define MAXCO 69
 
 
 
 
-void *hiloServidor(void *arg);
-char *obtenerRecursoSolicitado(char* httpHeader);
-void responderHTML(int cliente);
-void responderIcono(int cliente);
-void responderImagen(char *recurso, int cliente);
+void *mainThread(void *arg);
+char *getSolicitud(char* httpHeader);
+void sendHTML(int cliente);
+void sendIcon(int cliente);
+void sendImage(char *recurso, int cliente);
 char* parseDir(char * recurso);
-void escribirParteImagenes(FILE *html, DIR *dr);
-int generarHTML();
-int cargarPartesHTML();
-void *hiloBuscarCambios();
-char *actualizarCheckSum();
+void createMidHTML(FILE *html, DIR *dr);
+int generateHTML();
+int getTOPDOWNhtml();
 
 
 
 
-char *htmlParteSuperior;
-char *htmlParteSuperiorDir;
-char *htmlParteInferior;
-char *htmlParteInferiorDir;
-char *templateVideo = 
+char *htmlTOP;
+char *htmlTOPDir;
+char *htmlBOT;
+char *htmlBOTDir;
+/*char *templateVideo = 
 	"<div class=\"w3-third w3-container w3-margin-bottom\">\n"
 	"\t<img src=\"images/%s\"  alt=\"TONACO\" style=\"width:100%%\""
 	"class=\"w3-hover-opacity\" onclick=\"\">\n"
@@ -45,7 +42,7 @@ char *templateVideo =
 	"\t\t<p>Tamano: en bytes</p>\n"
 	"\t\t<p>Fecha y hora del archivo</p>\n"
 	"\t</div>\n"
-	"</div>\n";
+	"</div>\n";*/
 char *htmlHeader = 
 	"HTTP/1.1 403 Forbidden\r\n"
 	"Server: localHost:8080\r\n"
@@ -72,21 +69,16 @@ int main(int argc, char const *argv[]){
 	
 	//Datos necesarios la primera vez
 
-	//Partes estaticas a memoria - Las fijas
-	/*if(cargarPartesHTML()){
+
+	/*if(getTOPDOWNhtml()){
 		exit(-1);
 	}*/
 	//Generar el html del medio
-	if(generarHTML()){
+	if(generateHTML()){
 		exit(-1);
 	}
 
-	//Generar el checksum 1st time
-	/*checkSum = actualizarCheckSum();*/
 
-	//Thread para regenerar el html
-	/*pthread_t hiloGeneradorHTML;
-	pthread_create(&hiloGeneradorHTML,NULL,&hiloBuscarCambios,NULL);*/
 
 	int socketServidor, socketTemporal;
 	struct sockaddr_in direccionServidor;
@@ -102,7 +94,7 @@ int main(int argc, char const *argv[]){
 
 	bind(socketServidor, (struct sockaddr*)&direccionServidor, sizeof(direccionServidor));
 
-	listen(socketServidor, MAXIMAS_CONEXIONES);
+	listen(socketServidor, MAXCO);
 
 	while(1){
 		largoDireccion = sizeof(servidorStorage);
@@ -110,7 +102,7 @@ int main(int argc, char const *argv[]){
 
 		//hilo para atender socket
 		pthread_t nuevoHilo;
-		pthread_create(&nuevoHilo, NULL, &hiloServidor, (void *)&socketTemporal);
+		pthread_create(&nuevoHilo, NULL, &mainThread, (void *)&socketTemporal);
 
 		if(chingarmeElServidor){
 			break;
@@ -119,7 +111,7 @@ int main(int argc, char const *argv[]){
 	return 0;
 }
 
-int generarHTML(){
+int generateHTML(){
 
 
 	FILE * htmlFile = fopen("/home/iworth/Escritorio/Proyecto2/index.html", "r");
@@ -141,74 +133,66 @@ int generarHTML(){
 	return 0;
 }
 
-void *hiloServidor(void *arg){
+void *mainThread(void *arg){
 	char *buffer = (char *)malloc(4098);
 	
-	int socketCliente = *((int *)arg);
+	int webClient = *((int *)arg);
 
-	ssize_t datosLeidos = read(socketCliente, buffer, 4098);
+	ssize_t datosLeidos = read(webClient, buffer, 4098);
 	
 
 	if(datosLeidos<=0){
 		printf("helpp\n");
-		close(socketCliente);
+		close(webClient);
 		pthread_exit(NULL);
 	}
 	printf("DatosLeidos: %s\n",buffer);
 
-	char *recurso = obtenerRecursoSolicitado(buffer); //HACER FUNCION - QUE DEVUELVA LO DE ABAJO
+	char *recurso = getSolicitud(buffer); //HACER FUNCION - QUE DEVUELVA LO DE ABAJO
 	printf("recurso %s\n", recurso);
 
 	if(strcmp(recurso, "/") == 0){
-		printf("responderHTML\n");
-		responderHTML(socketCliente);
+		printf("sendHTML\n");
+		sendHTML(webClient);
 		printf("htmlrespondido\n");
 	}
 	else if(strcmp(recurso,"/favicon.ico") == 0){
-		printf("responderIcono\n");
-		responderIcono(socketCliente);
+		printf("sendIcon\n");
+		sendIcon(webClient);
 	}
 	else{
-		printf("responderImagen\n");
-		responderImagen(recurso,socketCliente);
+		printf("sendImage\n");
+		sendImage(recurso,webClient);
 	}
 
-	close(socketCliente);
+	close(webClient);
 	pthread_exit(NULL);
 }
 
-char *obtenerRecursoSolicitado(char *httpHeader){
-	if (httpHeader[0] == 'G' &&
-	    httpHeader[1] == 'E' &&
-	    httpHeader[2] == 'T') {
+char *getSolicitud(char *solicitud){
+	if (solicitud[0] == 'G' && solicitud[1] == 'E' && solicitud[2] == 'T') {
 		int i;
-		for(i = 4; httpHeader[i] != ' '; i++);
+		for(i = 4; solicitud[i] != ' '; i++);
 		if (i == 4){
-			char *recurso = {0};
-			return recurso;
+			char *recurse = {0};
+			return recurse;
 		}
 		int largo = i - 4;
-		char *recurso = (char *)malloc(largo + 1);
+		char *recurse = (char *)malloc(largo + 1);
 		int j=0;
 		for(int k = 4; k < i; k++){
-			recurso[j] = httpHeader[k];
+			recurse[j] = solicitud[k];
 			j++;
 		}
-		recurso[largo] = 0;
-		return recurso;
+		recurse[largo] = 0;
+		return recurse;
 	} else {
-		fprintf(stderr, "%s\n", "NO ERA UN GET");
 		return 0;
 	}
 }
 
-void responderHTML(int cliente){
-
-
+void sendHTML(int cliente){
 	write(cliente, htmlHeader, strlen(htmlHeader));
-
-
-
 	pthread_mutex_lock(&mutex);
 	htmlLargo = strlen(html);
 	write(cliente,html,htmlLargo);
@@ -216,13 +200,8 @@ void responderHTML(int cliente){
 
 }
 
-
-
-
-
-
-
-void escribirParteImagenes(FILE * html, DIR *dr){
+/*
+void createMidHTML(FILE * html, DIR *dr){
 	struct dirent *de;
 
 
@@ -243,59 +222,16 @@ void escribirParteImagenes(FILE * html, DIR *dr){
 	char *cerrarContenedor = "</div>";
 	fwrite(cerrarContenedor, 1, strlen(cerrarContenedor), html);
 
-}
+}*/
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-int cargarPartesHTML() {
+int getTOPDOWNhtml() {
 	size_t largoArchivo;
 
 
-	FILE * htmlSuperior = fopen(htmlParteSuperiorDir, "r");
+	FILE * htmlSuperior = fopen(htmlTOPDir, "r");
 
 	if(htmlSuperior == 0){
-		printf("No se pudo encontrar %s", htmlParteSuperiorDir);
+		printf("No se pudo encontrar %s", htmlTOPDir);
 		return 1;
 	}
 
@@ -304,15 +240,15 @@ int cargarPartesHTML() {
 	fseek(htmlSuperior, 0, SEEK_SET);
 
 
-	htmlParteSuperior = (char *)malloc(largoArchivo + 1);
-	fread(htmlParteSuperior, 1, largoArchivo, htmlSuperior);
+	htmlTOP = (char *)malloc(largoArchivo + 1);
+	fread(htmlTOP, 1, largoArchivo, htmlSuperior);
 	fclose(htmlSuperior);
 
 
-	FILE *htmlInferior = fopen(htmlParteInferiorDir, "r");
+	FILE *htmlInferior = fopen(htmlBOTDir, "r");
 
 	if(htmlInferior == 0){
-		printf("NO se pudo encontrar %s", htmlParteInferiorDir);
+		printf("NO se pudo encontrar %s", htmlBOTDir);
 		return 1;
 	}
 
@@ -321,14 +257,14 @@ int cargarPartesHTML() {
 	fseek(htmlInferior, 0 ,SEEK_SET);
 
 
-	htmlParteInferior = (char *)malloc(largoArchivo + 1);
-	fread(htmlParteInferior, 1, largoArchivo, htmlInferior);
+	htmlBOT = (char *)malloc(largoArchivo + 1);
+	fread(htmlBOT, 1, largoArchivo, htmlInferior);
 	fclose(htmlInferior);
 }
 
-void responderIcono(int cliente){
+void sendIcon(int cliente){
 	printf("respondio icono\n");
-	responderImagen("/icon.png", cliente);
+	sendImage("/icon.png", cliente);
 
 }
 
@@ -341,7 +277,7 @@ char* parseDir(char * recurso){
 	return result;
 }
 
-void responderImagen(char *recurso, int cliente){
+void sendImage(char *recurso, int cliente){
 	printf("recurso %s\n", recurso);
 	char *direccion = parseDir(recurso);
 	printf("prueba1\n");
