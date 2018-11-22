@@ -12,6 +12,7 @@
 #define PORT 8080
 #define MAXCO 69
 
+// gcc server.c -o server.out -lpthread
 
 
 
@@ -20,10 +21,15 @@ char *getSolicitud(char* httpHeader);
 void sendHTML(int cliente);
 void sendIcon(int cliente);
 void sendImage(char *recurso, int cliente);
+void sendVideo(char *recurso, int cliente);
 char* parseDir(char * recurso);
 void createMidHTML(FILE *html, DIR *dr);
 int generateHTML();
 int getTOPDOWNhtml();
+int isMP4(char* recurso);
+int isPNG(char* recurso);
+int getCantFrags(int largo, int tamanoFrag);
+char * getFragmento(char * buff,int page, int largoArchivo, int tamanoFrag);
 
 
 
@@ -161,14 +167,36 @@ void *mainThread(void *arg){
 		sendIcon(webClient);
 	}
 	else{
-		printf("sendImage\n");
-		sendImage(recurso,webClient);
+		if(isPNG(recurso)){
+			printf("sendImage\n");
+			sendImage(recurso,webClient);
+		}
+		else if(isMP4(recurso)){
+			printf("sendVIdeo\n");
+			sendVideo(recurso,webClient);
+		}else{
+			printf("NO POS NO\n");
+		}
+
 	}
 
 	close(webClient);
 	pthread_exit(NULL);
 }
-
+int isPNG(char* recurso){
+	int i;
+	for(i=0;recurso[i] != '.';i++);
+	if(recurso[i+1]=='p' && recurso[i+2]=='n')
+		return 1;
+	return 0;
+}
+int isMP4(char* recurso){
+	int i;
+	for(i=0;recurso[i] != '.';i++);
+	if(recurso[i+1]=='m' && recurso[i+2]=='p')
+		return 1;
+	return 0;
+}
 char *getSolicitud(char *solicitud){
 	if (solicitud[0] == 'G' && solicitud[1] == 'E' && solicitud[2] == 'T') {
 		int i;
@@ -277,22 +305,84 @@ char* parseDir(char * recurso){
 	return result;
 }
 
-void sendImage(char *recurso, int cliente){
-	printf("recurso %s\n", recurso);
+void sendVideo(char *recurso, int cliente){
+	printf("VIDEOrecurso %s\n", recurso);
 	char *direccion = parseDir(recurso);
-	printf("prueba1\n");
 	FILE *image = fopen(direccion,"rb");
-	printf("prueba2\n");
 	fseek(image,0,SEEK_END);
-	printf("prueba3\n");
 	size_t largoArchivo = (size_t)ftell(image);
-	printf("largo archivo %ld\n", largoArchivo);
 	fseek(image,0,SEEK_SET);
 
 
 	char *sendbuf = (char *)malloc( largoArchivo + 1);
 	size_t result = fread(sendbuf, 1, largoArchivo , image);
-	printf("result %ld\n", result);
+	fclose(image);
+
+	//creacion de header image
+	char header[2018];
+	sprintf(header,
+		"HTTP/1,1 200 OK\r\n"
+		"Server: localhost:8080\r\n"
+		"accept-ranges: bytes\r\n"
+		"access-control-allow-origin: \r\n"
+		"content-type: video/mp4\r\n"
+		"x-content-type-options: nosniff\r\n"
+		"x-xss-protection: 1; mode=block\r\n"
+		"content-length: %ld\r\n"
+		"\r\n", largoArchivo); 
+
+	int i=0;
+	write(cliente, header, strlen(header));
+	write(cliente,sendbuf,largoArchivo);
+	/*int cantPages = getCantFrags(largoArchivo,8000000);
+	printf("CANTIDAD DE PAGINAS %d\n", cantPages);
+	while(i<=cantPages){
+		char * help = getFragmento(sendbuf,i,largoArchivo,8000000);
+		write(cliente, help, largoArchivo);
+		i++;
+	}*/
+	
+	
+	
+}
+char * getFragmento(char * buff,int page, int largoArchivo, int tamanoFrag){
+	int inicio = page * tamanoFrag;
+	int fin;
+	if((page+1)*tamanoFrag>largoArchivo){
+		fin=largoArchivo;
+	}
+	else{
+		fin=(page+1)*tamanoFrag;
+	}
+	char * res = (char *)malloc( fin-inicio );
+	printf("NUMERO DE PAG: %d\n", page);
+	printf("FRAGMENTO INICIO: %d\n", inicio);
+	while(inicio<fin ){
+		res[inicio-(page*tamanoFrag)] = buff[inicio];
+		inicio++;
+	}
+	printf("FRAGMENTO FIN: %d\n", fin);
+	return res;
+}
+int getCantFrags(int largo, int tamanoFrag){
+	int completas = largo/tamanoFrag;
+	if(largo%tamanoFrag>0){
+		completas++;
+	}
+	completas = completas - 1;
+	return completas;
+}
+void sendImage(char *recurso, int cliente){
+	printf("recurso %s\n", recurso);
+	char *direccion = parseDir(recurso);
+	FILE *image = fopen(direccion,"rb");
+	fseek(image,0,SEEK_END);
+	size_t largoArchivo = (size_t)ftell(image);
+	fseek(image,0,SEEK_SET);
+
+
+	char *sendbuf = (char *)malloc( largoArchivo + 1);
+	size_t result = fread(sendbuf, 1, largoArchivo , image);
 	fclose(image);
 
 	//creacion de header image
@@ -308,9 +398,7 @@ void sendImage(char *recurso, int cliente){
 		"content-length: %ld\r\n"
 		"\r\n", largoArchivo); 
 	
-	printf("largo archivo ultimo %ld\n", largoArchivo);
 	write(cliente, header, strlen(header));
-	printf("%ld\n", sizeof(sendbuf));
 	write(cliente, sendbuf, largoArchivo);
 
 }
